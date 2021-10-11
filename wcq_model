@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Oct 10 20:24:24 2021
+
+@author: thomasgaudin
+"""
+import csv, random
+from copy import deepcopy
+
+def calculate_We(Ro, opponent_Ro, location):
+    
+    if location == 'home':
+        dr = (Ro + 100) - opponent_Ro
+        
+    elif location == 'away':
+        dr = Ro - (opponent_Ro + 100)
+    
+    We = 1 / (10 ** (-dr / 400) + 1)
+    
+    return We
+
+def calculate_home_win_probability(home_Ro, away_Ro):
+    
+    wp = (1 / (1 + 10**((away_Ro - home_Ro)/400))+0.1)**1.75
+    
+    return wp
+
+def calculate_away_win_probability(home_Ro, away_Ro):
+    
+    wp = (1 / (1 + 10**((home_Ro - away_Ro)/400)) - 0.1)**1.75
+    
+    return wp
+
+def calculate_elo(Ro, opponent_Ro, We, WLD, GD):
+    
+    if GD < 2:
+        GDM = 1
+    
+    elif GD == 2:
+        GDM = GD * 1.5
+        
+    elif GD == 3:
+        GDM == GD * 1.75
+        
+    elif GD >= 4:
+        GDM = GD * (1.75 + (GD - 3) / 8 )
+    
+    K = 40 * GDM
+    
+    Rn = Ro + K * (WLD - We)
+    
+    return Rn
+
+schedule_file = 'concacaf_schedule.csv'
+
+ranking_file = 'concacaf_elo.csv'
+
+table_file = 'concacaf_table.csv'
+
+matches = []
+
+elo_rank = dict()
+
+init_oct_table = dict()
+
+oct_table = dict()
+
+final_table = dict()
+
+average_final_table = dict()
+
+with open(schedule_file, 'r') as sched_file:
+    read_schedule = csv.reader(sched_file)
+    
+    location = next(read_schedule)
+    
+    for match in read_schedule:
+        vals = match[0].split(', ')
+        #print(vals)
+        matches.append(vals)
+        
+
+with open(ranking_file, 'r') as elo_file:
+    read_elo = csv.reader(elo_file)
+    
+    elo_header = next(read_elo)
+    
+    for team in read_elo:
+        #print(team)
+        elo_rank[team[0]] = int(team[1])
+        
+with open(table_file, 'r') as tab_file:
+    read_table = csv.reader(tab_file)
+    
+    table_header = next(read_table)
+    
+    for row in read_table:
+        oct_table[row[0]] = int(row[1])
+        init_oct_table[row[0]] = int(row[1])
+
+for team in oct_table.keys():
+    final_table[team] = []
+    
+print(elo_rank)
+
+print(oct_table)
+
+print(matches[0:4])
+
+iterations = 100000
+
+for num in range(iterations):
+    
+    count = 4
+    
+    while count <= len(matches):
+        
+        for match in matches[count-4 : count]:
+        
+            home_team = match[0]
+            home_elo = elo_rank[home_team]
+            
+            away_team = match[1]
+            away_elo = elo_rank[away_team]
+            
+            home_we = calculate_We(home_elo, away_elo, 'home')
+            away_we = calculate_We(away_elo, home_elo, 'away')
+            
+            home_wp = calculate_home_win_probability(home_elo, away_elo)
+            away_wp = calculate_away_win_probability(home_elo, away_elo)
+            
+            draw_wp = 1 - home_wp - away_wp
+            
+            #print(f'{home_team} / draw / {away_team}')
+            #print(f'{home_wp} / {draw_wp} / {away_wp}')
+            
+            weights = [home_wp, draw_wp, away_wp]
+            
+            outcomes = [1.0, 0.5, 0.0]
+            
+            outcome = random.choices(outcomes, weights=sorted(weights), k=1)
+            
+            #home win
+            if outcome[0] == 1:
+                
+                #update table
+                oct_table[home_team] += 3
+                oct_table[away_team] += 0
+                
+                #new home elo
+                new_home_elo = calculate_elo(home_elo, away_elo, home_we, outcome[0], 1)
+                
+                elo_rank[home_team] = new_home_elo
+                
+                #new away elo
+                new_away_elo = calculate_elo(away_elo, home_elo, away_we, 0, 1)
+                
+                elo_rank[away_team] = new_away_elo
+                
+            elif outcome[0] == 0.5:
+                
+                #update table
+                oct_table[home_team] += 1
+                oct_table[away_team] += 1
+                
+                #new home elo
+                new_home_elo = calculate_elo(home_elo, away_elo, home_we, outcome[0], 0)
+                
+                elo_rank[home_team] = new_home_elo
+                
+                #new away elo
+                new_away_elo = calculate_elo(away_elo, home_elo, away_we, outcome[0], 0)
+                
+                elo_rank[away_team] = new_away_elo
+                
+            #away win    
+            else:
+            
+                #update table
+                oct_table[home_team] += 0
+                oct_table[away_team] += 3
+                
+                #new home elo
+                new_home_elo = calculate_elo(home_elo, away_elo, home_we, 0, 1)
+                
+                elo_rank[home_team] = new_home_elo
+                
+                #new away elo
+                new_away_elo = calculate_elo(away_elo, home_elo, away_we, outcome[0], 1)
+                
+                elo_rank[away_team] = new_away_elo
+                
+                
+        count += 4
+        
+
+    
+    for team in oct_table.keys():
+        
+        final_table[team].append(oct_table[team])
+        
+        oct_table[team] = deepcopy(init_oct_table[team])
+    
+    #print(final_table)
+    
+for team in oct_table.keys():
+    total_points = sum(final_table[team])
+        
+    average_final_table[team] = total_points / iterations
+        
+print(average_final_table)
